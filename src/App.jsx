@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, AudioLines, Camera, Clapperboard, Images, LayoutDashboard, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Activity, AudioLines, Camera, Clapperboard, Download, Images, LayoutDashboard, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { demoProject, effectPresets } from './data/demoProject.js';
 import { createImageAsset, formatBytes } from './lib/assetScoring.js';
 import { createAudioAsset } from './lib/audioAnalyzer.js';
 import { estimateBeatGrid, planCutsFromAssets } from './lib/beatPlanner.js';
 import { clearStoredProject, loadSnapshots, loadStoredProject, saveSnapshot, saveStoredProject } from './lib/projectStorage.js';
+import { createRenderManifest, downloadManifest } from './lib/renderManifest.js';
 import { createRenderJob, simulateRenderProgress } from './lib/renderQueue.js';
 
 const tabs = [
@@ -44,6 +45,14 @@ export function App() {
     bpm: audioMeta.bpm
   }), [project.assets, audioMeta.duration, audioMeta.bpm]);
 
+  const renderManifest = useMemo(() => createRenderManifest({
+    project,
+    audio: audioMeta,
+    preset: selectedPreset,
+    profile: selectedProfile,
+    timeline: plannedTimeline
+  }), [project, audioMeta, selectedPreset, selectedProfile, plannedTimeline]);
+
   useEffect(() => {
     saveStoredProject(project);
   }, [project]);
@@ -53,7 +62,8 @@ export function App() {
       projectId: project.id,
       profile: selectedProfile,
       preset: selectedPreset,
-      timeline: plannedTimeline
+      timeline: plannedTimeline,
+      manifest: renderManifest
     }));
   }
 
@@ -163,6 +173,7 @@ export function App() {
           beats={beats}
           plannedTimeline={plannedTimeline}
           renderJob={renderJob}
+          renderManifest={renderManifest}
           queueRender={queueRender}
           progressRender={progressRender}
           handleImagesSelected={handleImagesSelected}
@@ -179,7 +190,7 @@ export function App() {
   );
 }
 
-function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
+function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
   return (
     <section className="workspace-grid">
       <UploadZone
@@ -200,6 +211,7 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
           </div>
           <span className="pill">{beats.length} beatów</span>
         </div>
+        <WaveformPreview audioMeta={audioMeta} beats={beats} />
         <div className="timeline">
           {plannedTimeline.map((clip) => (
             <div key={`${clip.assetId}-${clip.start}`} className="clip" style={{ width: `${Math.max(12, (clip.end - clip.start) * 3)}%` }}>
@@ -258,6 +270,13 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
             </button>
           ))}
         </div>
+        <div className="manifest-card">
+          <strong>Render manifest</strong>
+          <span>{renderManifest.timeline.length} klipów · {renderManifest.output.width}×{renderManifest.output.height} · {renderManifest.output.fps} FPS</span>
+          <button className="ghost-btn full" onClick={() => downloadManifest(renderManifest)}>
+            <Download size={16} /> Pobierz manifest JSON
+          </button>
+        </div>
         <button className="primary-btn full" onClick={queueRender}>Dodaj render</button>
         {renderJob && (
           <div className="job-card">
@@ -266,11 +285,34 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
               <span>{renderJob.progress}%</span>
             </div>
             <div className="progress"><span style={{ width: `${renderJob.progress}%` }} /></div>
+            <p>{renderJob.manifest?.output.width}×{renderJob.manifest?.output.height} · {renderJob.manifest?.timeline.length} klipów</p>
             {renderJob.output ? <p>Gotowe: {renderJob.output}</p> : <button className="ghost-btn full" onClick={progressRender}>Symuluj postęp</button>}
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function WaveformPreview({ audioMeta, beats }) {
+  const peaks = audioMeta.waveform ?? [];
+
+  return (
+    <div className="waveform-card">
+      <div className="waveform-meta">
+        <strong>{audioMeta.name}</strong>
+        <span>{audioMeta.bpm} BPM · {audioMeta.duration}s · {audioMeta.energy}</span>
+      </div>
+      <div className="waveform-bars" aria-label="Audio waveform preview">
+        {(peaks.length ? peaks : Array.from({ length: 96 }, () => 0.18)).map((peak, index) => (
+          <span
+            key={`${index}-${peak}`}
+            className={beats[index]?.strength === 'downbeat' ? 'wave-bar downbeat' : 'wave-bar'}
+            style={{ height: `${Math.max(8, peak * 74)}px` }}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
