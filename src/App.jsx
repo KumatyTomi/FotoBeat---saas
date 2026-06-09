@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, AudioLines, Camera, CheckCircle2, Clapperboard, Cloud, Download, Images, LayoutDashboard, Pause, Play, Rocket, Save, Server, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { demoProject, effectPresets } from './data/demoProject.js';
 import { apiClient } from './lib/apiClient.js';
+import { markAssetLocal, markAssetUploading, uploadAssetToBackend, buildBackendManifest, countFailedAssets, countSyncedAssets } from './lib/assetSync.js';
 import { createImageAsset, formatBytes } from './lib/assetScoring.js';
 import { createAudioAsset } from './lib/audioAnalyzer.js';
 import { estimateBeatGrid, planCutsFromAssets } from './lib/beatPlanner.js';
@@ -22,8 +23,8 @@ function createInitialProject() {
 
   return storedProject ?? {
     ...demoProject,
-    assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo' })),
-    audio: { ...demoProject.audio, source: 'demo' }
+    assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo', syncStatus: 'local' })),
+    audio: { ...demoProject.audio, source: 'demo', syncStatus: 'local' }
   };
 }
 
@@ -43,6 +44,12 @@ export function App() {
   const [apiError, setApiError] = useState(null);
 
   const audioMeta = project.audio ?? demoProject.audio;
+  const syncScope = useMemo(() => [...project.assets, project.audio].filter(Boolean), [project.assets, project.audio]);
+  const syncStats = useMemo(() => ({
+    synced: countSyncedAssets(syncScope),
+    failed: countFailedAssets(syncScope),
+    total: syncScope.length
+  }), [syncScope]);
 
   const beats = useMemo(() => estimateBeatGrid({
     durationSeconds: audioMeta.duration,
@@ -126,7 +133,7 @@ export function App() {
     setBackendStatus({ state: 'loading', label: 'Wysyłam manifest renderu...' });
 
     try {
-      const createdRenderJob = await apiClient.createRenderJob(remoteProject.id, {
+      const backendManifest = buildBackendManifest({
         ...renderManifest,
         project: {
           ...renderManifest.project,
@@ -134,6 +141,7 @@ export function App() {
           title: remoteProject.title
         }
       });
+      const createdRenderJob = await apiClient.createRenderJob(remoteProject.id, backendManifest);
       setRemoteRenderJob(createdRenderJob);
       setBackendStatus({ state: 'online', label: `Render API: ${createdRenderJob.status}` });
     } catch (error) {
@@ -171,11 +179,59 @@ export function App() {
     setRenderJob((job) => job ? simulateRenderProgress(job) : job);
   }
 
+  function updateLocalAsset(assetId, updater) {
+    setProject((current) => ({
+      ...current,
+      assets: current.assets.map((asset) => asset.id === assetId ? updater(asset) : asset)
+    }));
+  }
+
+  function updateLocalAudio(updater) {
+    setProject((current) => ({
+      ...current,
+      audio: current.audio ? updater(current.audio) : current.audio
+    }));
+  }
+
+  async function syncFileToBackend({ file, asset, kind }) {
+    if (!remoteProject) return;
+
+    setApiError(null);
+    setBackendStatus({ state: 'loading', label: `Upload ${asset.name} do API...` });
+
+    if (kind === 'audio') {
+      updateLocalAudio((current) => current.id === asset.id ? markAssetUploading(current) : current);
+    } else {
+      updateLocalAsset(asset.id, markAssetUploading);
+    }
+
+    const syncedAsset = await uploadAssetToBackend({
+      apiClient,
+      remoteProjectId: remoteProject.id,
+      file,
+      localAsset: markAssetUploading(asset)
+    });
+
+    if (kind === 'audio') {
+      updateLocalAudio((current) => current.id === asset.id ? syncedAsset : current);
+    } else {
+      updateLocalAsset(asset.id, () => syncedAsset);
+    }
+
+    if (syncedAsset.syncStatus === 'failed') {
+      setBackendStatus({ state: 'offline', label: 'Błąd uploadu assetu' });
+      setApiError(syncedAsset.syncError);
+      return;
+    }
+
+    setBackendStatus({ state: 'online', label: `Asset API: ${syncedAsset.remoteId?.slice(0, 18)}...` });
+  }
+
   function handleImagesSelected(files) {
     const { accepted, errors } = validateImageFiles(files, project.assets.length);
     setUploadErrors(errors);
 
-    const imageAssets = accepted.map((file, index) => createImageAsset(file, index));
+    const imageAssets = accepted.map((file, index) => markAssetLocal(createImageAsset(file, index)));
 
     if (!imageAssets.length) return;
 
@@ -184,6 +240,12 @@ export function App() {
       status: 'editing',
       assets: [...imageAssets, ...current.assets]
     }));
+
+    if (remoteProject) {
+      imageAssets.forEach((asset, index) => {
+        void syncFileToBackend({ file: accepted[index], asset, kind: 'image' });
+      });
+    }
   }
 
   async function handleAudioSelected(file) {
@@ -192,13 +254,17 @@ export function App() {
 
     if (!accepted) return;
 
-    const audio = await createAudioAsset(accepted);
+    const audio = markAssetLocal(await createAudioAsset(accepted));
     setProject((current) => ({
       ...current,
       status: 'editing',
       audio
     }));
     setPreviewTime(0);
+
+    if (remoteProject) {
+      void syncFileToBackend({ file: accepted, asset: audio, kind: 'audio' });
+    }
   }
 
   function removeAsset(assetId) {
@@ -216,8 +282,8 @@ export function App() {
     clearStoredProject();
     setProject({
       ...demoProject,
-      assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo' })),
-      audio: { ...demoProject.audio, source: 'demo' }
+      assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo', syncStatus: 'local' })),
+      audio: { ...demoProject.audio, source: 'demo', syncStatus: 'local' }
     });
     setRenderJob(null);
     setUploadErrors([]);
@@ -306,6 +372,7 @@ export function App() {
           remoteProject={remoteProject}
           remoteRenderJob={remoteRenderJob}
           apiError={apiError}
+          syncStats={syncStats}
           checkBackend={checkBackend}
           syncProjectToBackend={syncProjectToBackend}
           createBackendRenderJob={createBackendRenderJob}
@@ -313,13 +380,13 @@ export function App() {
         />
       )}
 
-      {activeTab === 'projects' && <Projects project={project} snapshots={snapshots} remoteProject={remoteProject} remoteRenderJob={remoteRenderJob} />}
+      {activeTab === 'projects' && <Projects project={project} snapshots={snapshots} remoteProject={remoteProject} remoteRenderJob={remoteRenderJob} syncStats={syncStats} />}
       {activeTab === 'roadmap' && <Roadmap />}
     </main>
   );
 }
 
-function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors, previewTime, playbackDuration, activeAsset, activeClip, isPreviewPlaying, togglePreview, backendStatus, remoteProject, remoteRenderJob, apiError, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
+function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors, previewTime, playbackDuration, activeAsset, activeClip, isPreviewPlaying, togglePreview, backendStatus, remoteProject, remoteRenderJob, apiError, syncStats, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
   return (
     <section className="workspace-grid">
       <UploadZone
@@ -414,6 +481,7 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
           remoteProject={remoteProject}
           remoteRenderJob={remoteRenderJob}
           apiError={apiError}
+          syncStats={syncStats}
           checkBackend={checkBackend}
           syncProjectToBackend={syncProjectToBackend}
           createBackendRenderJob={createBackendRenderJob}
@@ -444,7 +512,7 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
   );
 }
 
-function BackendPanel({ backendStatus, remoteProject, remoteRenderJob, apiError, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
+function BackendPanel({ backendStatus, remoteProject, remoteRenderJob, apiError, syncStats, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
   const StatusIcon = backendStatus.state === 'online' ? CheckCircle2 : backendStatus.state === 'loading' ? Cloud : Server;
 
   return (
@@ -455,6 +523,10 @@ function BackendPanel({ backendStatus, remoteProject, remoteRenderJob, apiError,
           <strong>FastAPI · {apiClient.baseUrl}</strong>
         </div>
         <span className={`backend-status ${backendStatus.state}`}><StatusIcon size={15} /> {backendStatus.label}</span>
+      </div>
+      <div className="sync-summary">
+        <span>Synced: {syncStats.synced}/{syncStats.total}</span>
+        <span>Failed: {syncStats.failed}</span>
       </div>
       <div className="backend-actions">
         <button className="ghost-btn" onClick={checkBackend}>Sprawdź API</button>
@@ -560,7 +632,7 @@ function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelec
           />
           <AudioLines size={28} />
           <strong>Wrzuć MP3/WAV</strong>
-          <span>{audioMeta.name} · {audioMeta.bpm} BPM · {audioMeta.duration}s</span>
+          <span>{audioMeta.name} · {audioMeta.bpm} BPM · {audioMeta.duration}s · {audioMeta.syncStatus ?? 'local'}</span>
         </label>
       </div>
 
@@ -588,7 +660,10 @@ function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelec
             <div>
               <strong>{asset.name}</strong>
               <span>{asset.score}/100 · {asset.source ?? 'asset'} · {formatBytes(asset.size)}</span>
-              <small>{asset.tags?.join(' · ')}</small>
+              <span className="sync-row">
+                <SyncBadge status={asset.syncStatus} />
+                {asset.remoteId ? <small>{asset.remoteId.slice(0, 18)}...</small> : <small>{asset.tags?.join(' · ')}</small>}
+              </span>
             </div>
             <button className="icon-btn" onClick={() => removeAsset(asset.id)} aria-label={`Usuń ${asset.name}`}>
               <Trash2 size={16} />
@@ -598,6 +673,10 @@ function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelec
       </div>
     </div>
   );
+}
+
+function SyncBadge({ status = 'local' }) {
+  return <small className={`sync-badge ${status}`}>{status}</small>;
 }
 
 function RenderLogs({ logs = [] }) {
@@ -612,7 +691,7 @@ function RenderLogs({ logs = [] }) {
   );
 }
 
-function Projects({ project, snapshots, remoteProject, remoteRenderJob }) {
+function Projects({ project, snapshots, remoteProject, remoteRenderJob, syncStats }) {
   return (
     <section className="panel page-panel">
       <p className="eyebrow">Projects hub</p>
@@ -622,6 +701,7 @@ function Projects({ project, snapshots, remoteProject, remoteRenderJob }) {
         <span>Status lokalny: {project.status}</span>
         <span>Audio: {project.audio?.name}</span>
         <span>Assets: {project.assets.length}</span>
+        <span>Sync: {syncStats.synced}/{syncStats.total} · failed {syncStats.failed}</span>
       </div>
       {remoteProject && (
         <div className="project-card">
