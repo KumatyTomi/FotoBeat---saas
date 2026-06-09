@@ -1,12 +1,12 @@
 export async function createAudioAsset(file) {
   const fallback = createFallbackAudioAsset(file);
+  const AudioContextClass = globalThis.AudioContext ?? globalThis.webkitAudioContext;
 
-  if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') {
+  if (!AudioContextClass) {
     return fallback;
   }
 
   try {
-    const AudioContextClass = AudioContext || webkitAudioContext;
     const context = new AudioContextClass();
     const buffer = await file.arrayBuffer();
     const decoded = await context.decodeAudioData(buffer.slice(0));
@@ -51,8 +51,8 @@ export function estimateBpmFromDuration(duration) {
 }
 
 function createId(prefix) {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return `${prefix}-${crypto.randomUUID()}`;
+  if (globalThis.crypto?.randomUUID) {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`;
   }
 
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
