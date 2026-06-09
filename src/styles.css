@@ -256,7 +256,7 @@ h3 {
   pointer-events: none;
 }
 
-.drop-card span, .preset span, .profile span, .project-card span, .asset-card span, .clip span, .job-card p, .snapshot-card span, .muted {
+.drop-card span, .preset span, .profile span, .project-card span, .asset-card span, .clip span, .job-card p, .snapshot-card span, .muted, .waveform-meta span, .manifest-card span {
   color: #bdb7cc;
 }
 
@@ -317,6 +317,49 @@ h3 {
   place-items: center;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.waveform-card, .manifest-card {
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 16px;
+}
+
+.manifest-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.waveform-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.waveform-bars {
+  min-height: 94px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.wave-bar {
+  width: 100%;
+  min-width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(82, 241, 255, 0.95), rgba(255, 79, 216, 0.45));
+  opacity: 0.82;
+}
+
+.wave-bar.downbeat {
+  background: linear-gradient(180deg, rgba(248, 225, 108, 1), rgba(255, 79, 216, 0.68));
+  opacity: 1;
 }
 
 .timeline {
