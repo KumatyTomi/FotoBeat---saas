@@ -44,10 +44,14 @@ async def upload_asset(project_id: str, file: UploadFile = File(...)) -> Asset:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail='Project not found')
 
+    asset_type = infer_asset_type(file.content_type or '')
+    if asset_type == 'unknown':
+        raise HTTPException(status_code=400, detail='Unsupported asset content type')
+
     storage_url, size = await save_upload(project_id, file)
     asset = Asset(
         project_id=project_id,
-        type=infer_asset_type(file.content_type or ''),
+        type=asset_type,
         filename=file.filename or 'upload.bin',
         content_type=file.content_type or 'application/octet-stream',
         size_bytes=size,
@@ -74,6 +78,13 @@ def create_render_job(project_id: str, payload: RenderJobCreate) -> RenderJob:
         logs=['Render job accepted by API'],
     )
     return store.add_render_job(job)
+
+
+@app.get('/api/projects/{project_id}/renders', response_model=list[RenderJob])
+def list_project_render_jobs(project_id: str) -> list[RenderJob]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail='Project not found')
+    return store.list_render_jobs(project_id)
 
 
 @app.get('/api/renders/{render_id}', response_model=RenderJob)
