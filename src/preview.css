@@ -90,12 +90,74 @@
   box-shadow: 0 0 34px rgba(248, 225, 108, 0.18);
 }
 
-.error-list {
-  margin-top: 16px;
+.backend-card {
   display: grid;
+  gap: 12px;
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 22px;
+  background: rgba(82, 241, 255, 0.07);
+  border: 1px solid rgba(82, 241, 255, 0.16);
+}
+
+.backend-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.backend-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: #f7f2ff;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.backend-status.online {
+  color: #d9fff9;
+  background: rgba(82, 241, 255, 0.14);
+}
+
+.backend-status.offline {
+  color: #ffd1dc;
+  background: rgba(255, 79, 108, 0.14);
+}
+
+.backend-status.loading {
+  color: #fff4bf;
+  background: rgba(248, 225, 108, 0.13);
+}
+
+.backend-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
+.backend-card p,
+.remote-job p {
+  margin: 0;
+  color: #bdb7cc;
+}
+
+.backend-card code {
+  color: #d9fff9;
+  white-space: normal;
+}
+
+.remote-job {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.api-error,
 .error-list p {
   margin: 0;
   display: flex;
@@ -106,6 +168,12 @@
   border-radius: 14px;
   background: rgba(255, 79, 108, 0.11);
   border: 1px solid rgba(255, 79, 108, 0.28);
+}
+
+.error-list {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
 }
 
 .render-logs {
@@ -123,9 +191,20 @@
   white-space: normal;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 @media (max-width: 560px) {
-  .preview-controls {
+  .preview-controls,
+  .backend-actions {
     grid-template-columns: 1fr;
+  }
+
+  .backend-topline {
+    display: grid;
   }
 
   .preview-stage,
