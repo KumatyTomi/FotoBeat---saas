@@ -1,3 +1,5 @@
+import { createSyntheticWaveform, extractWaveformPeaks } from './waveform.js';
+
 export async function createAudioAsset(file) {
   const fallback = createFallbackAudioAsset(file);
   const AudioContextClass = globalThis.AudioContext ?? globalThis.webkitAudioContext;
@@ -18,6 +20,7 @@ export async function createAudioAsset(file) {
       bpm: estimateBpmFromDuration(decoded.duration),
       channels: decoded.numberOfChannels,
       sampleRate: decoded.sampleRate,
+      waveform: extractWaveformPeaks(decoded, 96),
       energy: decoded.duration > 60 ? 'medium' : 'high'
     };
   } catch (error) {
@@ -37,6 +40,7 @@ export function createFallbackAudioAsset(file) {
     mimeType: file.type,
     duration: 45,
     bpm: 128,
+    waveform: createSyntheticWaveform(96, file.name.length + file.size),
     energy: 'unknown',
     source: 'local',
     createdAt: new Date().toISOString()
