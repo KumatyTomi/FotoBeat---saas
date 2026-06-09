@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, AudioLines, Camera, Clapperboard, Download, Images, LayoutDashboard, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Activity, AlertTriangle, AudioLines, Camera, Clapperboard, Download, Images, LayoutDashboard, Pause, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { demoProject, effectPresets } from './data/demoProject.js';
 import { createImageAsset, formatBytes } from './lib/assetScoring.js';
 import { createAudioAsset } from './lib/audioAnalyzer.js';
 import { estimateBeatGrid, planCutsFromAssets } from './lib/beatPlanner.js';
+import { getClipAtTime, getPlaybackDuration, getPlaybackProgress, advancePreviewTime } from './lib/previewPlayback.js';
 import { clearStoredProject, loadSnapshots, loadStoredProject, saveSnapshot, saveStoredProject } from './lib/projectStorage.js';
 import { createRenderManifest, downloadManifest } from './lib/renderManifest.js';
 import { createRenderJob, simulateRenderProgress } from './lib/renderQueue.js';
+import { validateAudioFile, validateImageFiles } from './lib/uploadValidation.js';
 
 const tabs = [
   { id: 'editor', label: 'Editor', icon: Wand2 },
@@ -31,6 +33,9 @@ export function App() {
   const [selectedPreset, setSelectedPreset] = useState(effectPresets[0]);
   const [selectedProfile, setSelectedProfile] = useState(project.exportProfiles[0]);
   const [renderJob, setRenderJob] = useState(null);
+  const [uploadErrors, setUploadErrors] = useState([]);
+  const [previewTime, setPreviewTime] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
 
   const audioMeta = project.audio ?? demoProject.audio;
 
@@ -45,6 +50,10 @@ export function App() {
     bpm: audioMeta.bpm
   }), [project.assets, audioMeta.duration, audioMeta.bpm]);
 
+  const playbackDuration = useMemo(() => getPlaybackDuration(plannedTimeline, audioMeta.duration), [plannedTimeline, audioMeta.duration]);
+  const activeClip = useMemo(() => getClipAtTime(plannedTimeline, previewTime), [plannedTimeline, previewTime]);
+  const activeAsset = useMemo(() => project.assets.find((asset) => asset.id === activeClip?.assetId), [project.assets, activeClip]);
+
   const renderManifest = useMemo(() => createRenderManifest({
     project,
     audio: audioMeta,
@@ -56,6 +65,21 @@ export function App() {
   useEffect(() => {
     saveStoredProject(project);
   }, [project]);
+
+  useEffect(() => {
+    if (!isPreviewPlaying) return undefined;
+
+    const interval = window.setInterval(() => {
+      setPreviewTime((currentTime) => advancePreviewTime({
+        currentTime,
+        timeline: plannedTimeline,
+        fallbackDuration: audioMeta.duration,
+        delta: 0.5
+      }));
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [isPreviewPlaying, plannedTimeline, audioMeta.duration]);
 
   function queueRender() {
     setRenderJob(createRenderJob({
@@ -72,9 +96,10 @@ export function App() {
   }
 
   function handleImagesSelected(files) {
-    const imageAssets = [...files]
-      .filter((file) => file.type.startsWith('image/'))
-      .map((file, index) => createImageAsset(file, index));
+    const { accepted, errors } = validateImageFiles(files, project.assets.length);
+    setUploadErrors(errors);
+
+    const imageAssets = accepted.map((file, index) => createImageAsset(file, index));
 
     if (!imageAssets.length) return;
 
@@ -86,14 +111,18 @@ export function App() {
   }
 
   async function handleAudioSelected(file) {
-    if (!file) return;
+    const { accepted, errors } = validateAudioFile(file);
+    setUploadErrors(errors);
 
-    const audio = await createAudioAsset(file);
+    if (!accepted) return;
+
+    const audio = await createAudioAsset(accepted);
     setProject((current) => ({
       ...current,
       status: 'editing',
       audio
     }));
+    setPreviewTime(0);
   }
 
   function removeAsset(assetId) {
@@ -115,6 +144,13 @@ export function App() {
       audio: { ...demoProject.audio, source: 'demo' }
     });
     setRenderJob(null);
+    setUploadErrors([]);
+    setPreviewTime(0);
+    setIsPreviewPlaying(false);
+  }
+
+  function togglePreview() {
+    setIsPreviewPlaying((current) => !current);
   }
 
   return (
@@ -181,6 +217,13 @@ export function App() {
           removeAsset={removeAsset}
           createManualSnapshot={createManualSnapshot}
           resetProject={resetProject}
+          uploadErrors={uploadErrors}
+          previewTime={previewTime}
+          playbackDuration={playbackDuration}
+          activeAsset={activeAsset}
+          activeClip={activeClip}
+          isPreviewPlaying={isPreviewPlaying}
+          togglePreview={togglePreview}
         />
       )}
 
@@ -190,7 +233,7 @@ export function App() {
   );
 }
 
-function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
+function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors, previewTime, playbackDuration, activeAsset, activeClip, isPreviewPlaying, togglePreview }) {
   return (
     <section className="workspace-grid">
       <UploadZone
@@ -201,6 +244,7 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
         removeAsset={removeAsset}
         createManualSnapshot={createManualSnapshot}
         resetProject={resetProject}
+        uploadErrors={uploadErrors}
       />
 
       <div className="panel timeline-panel">
@@ -211,10 +255,19 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
           </div>
           <span className="pill">{beats.length} beatów</span>
         </div>
+        <PreviewPlayer
+          activeAsset={activeAsset}
+          activeClip={activeClip}
+          selectedPreset={selectedPreset}
+          previewTime={previewTime}
+          playbackDuration={playbackDuration}
+          isPreviewPlaying={isPreviewPlaying}
+          togglePreview={togglePreview}
+        />
         <WaveformPreview audioMeta={audioMeta} beats={beats} />
         <div className="timeline">
           {plannedTimeline.map((clip) => (
-            <div key={`${clip.assetId}-${clip.start}`} className="clip" style={{ width: `${Math.max(12, (clip.end - clip.start) * 3)}%` }}>
+            <div key={`${clip.assetId}-${clip.start}`} className={activeClip === clip ? 'clip active' : 'clip'} style={{ width: `${Math.max(12, (clip.end - clip.start) * 3)}%` }}>
               <strong>{clip.effect}</strong>
               <span>{clip.start}s — {clip.end}s</span>
               <small>{clip.assetId.slice(0, 10)}</small>
@@ -287,10 +340,41 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
             <div className="progress"><span style={{ width: `${renderJob.progress}%` }} /></div>
             <p>{renderJob.manifest?.output.width}×{renderJob.manifest?.output.height} · {renderJob.manifest?.timeline.length} klipów</p>
             {renderJob.output ? <p>Gotowe: {renderJob.output}</p> : <button className="ghost-btn full" onClick={progressRender}>Symuluj postęp</button>}
+            <RenderLogs logs={renderJob.logs} />
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function PreviewPlayer({ activeAsset, activeClip, selectedPreset, previewTime, playbackDuration, isPreviewPlaying, togglePreview }) {
+  const progress = getPlaybackProgress(previewTime, playbackDuration);
+
+  return (
+    <div className="preview-card">
+      <div className="preview-stage">
+        {activeAsset?.previewUrl ? (
+          <img src={activeAsset.previewUrl} alt={activeAsset.name} />
+        ) : (
+          <div className="preview-placeholder"><Camera size={36} /></div>
+        )}
+        <div className="preview-overlay">
+          <span>{selectedPreset.name}</span>
+          <strong>{activeClip?.effect ?? 'waiting-for-timeline'}</strong>
+        </div>
+      </div>
+      <div className="preview-controls">
+        <button className="primary-btn" onClick={togglePreview}>
+          {isPreviewPlaying ? <Pause size={16} /> : <Play size={16} />}
+          {isPreviewPlaying ? 'Pauza' : 'Preview'}
+        </button>
+        <div className="preview-progress">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        <small>{previewTime.toFixed(1)}s / {playbackDuration.toFixed(1)}s</small>
+      </div>
+    </div>
   );
 }
 
@@ -316,7 +400,7 @@ function WaveformPreview({ audioMeta, beats }) {
   );
 }
 
-function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
+function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors }) {
   return (
     <div className="panel upload-panel">
       <div className="panel-heading">
@@ -349,6 +433,14 @@ function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelec
         </label>
       </div>
 
+      {uploadErrors.length > 0 && (
+        <div className="error-list">
+          {uploadErrors.map((error) => (
+            <p key={error}><AlertTriangle size={15} /> {error}</p>
+          ))}
+        </div>
+      )}
+
       <div className="toolbar-row">
         <button className="ghost-btn" onClick={createManualSnapshot}><Save size={16} /> Snapshot</button>
         <button className="ghost-btn" onClick={resetProject}><Trash2 size={16} /> Reset</button>
@@ -373,6 +465,18 @@ function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelec
           </article>
         ))}
       </div>
+    </div>
+  );
+}
+
+function RenderLogs({ logs = [] }) {
+  if (!logs.length) return null;
+
+  return (
+    <div className="render-logs">
+      {logs.slice(-5).map((log, index) => (
+        <code key={`${log}-${index}`}>{log}</code>
+      ))}
     </div>
   );
 }
