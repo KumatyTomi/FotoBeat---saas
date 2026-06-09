@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, AudioLines, Camera, Clapperboard, Download, Images, LayoutDashboard, Pause, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Activity, AlertTriangle, AudioLines, Camera, CheckCircle2, Clapperboard, Cloud, Download, Images, LayoutDashboard, Pause, Play, Rocket, Save, Server, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { demoProject, effectPresets } from './data/demoProject.js';
+import { apiClient } from './lib/apiClient.js';
 import { createImageAsset, formatBytes } from './lib/assetScoring.js';
 import { createAudioAsset } from './lib/audioAnalyzer.js';
 import { estimateBeatGrid, planCutsFromAssets } from './lib/beatPlanner.js';
@@ -36,6 +37,10 @@ export function App() {
   const [uploadErrors, setUploadErrors] = useState([]);
   const [previewTime, setPreviewTime] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [backendStatus, setBackendStatus] = useState({ state: 'idle', label: 'Nie sprawdzono API' });
+  const [remoteProject, setRemoteProject] = useState(null);
+  const [remoteRenderJob, setRemoteRenderJob] = useState(null);
+  const [apiError, setApiError] = useState(null);
 
   const audioMeta = project.audio ?? demoProject.audio;
 
@@ -80,6 +85,77 @@ export function App() {
 
     return () => window.clearInterval(interval);
   }, [isPreviewPlaying, plannedTimeline, audioMeta.duration]);
+
+  async function checkBackend() {
+    setApiError(null);
+    setBackendStatus({ state: 'loading', label: 'Sprawdzam API...' });
+
+    try {
+      const health = await apiClient.health();
+      setBackendStatus({ state: 'online', label: `${health.service}: ${health.status}` });
+    } catch (error) {
+      setBackendStatus({ state: 'offline', label: 'API offline' });
+      setApiError(error.message);
+    }
+  }
+
+  async function syncProjectToBackend() {
+    setApiError(null);
+    setBackendStatus({ state: 'loading', label: 'Tworzę projekt w API...' });
+
+    try {
+      const createdProject = await apiClient.createProject({
+        title: project.title,
+        preset_id: selectedPreset.id
+      });
+      setRemoteProject(createdProject);
+      setBackendStatus({ state: 'online', label: `Projekt API: ${createdProject.id.slice(0, 18)}...` });
+    } catch (error) {
+      setBackendStatus({ state: 'offline', label: 'Błąd sync projektu' });
+      setApiError(error.message);
+    }
+  }
+
+  async function createBackendRenderJob() {
+    if (!remoteProject) {
+      setApiError('Najpierw utwórz projekt w backendzie.');
+      return;
+    }
+
+    setApiError(null);
+    setBackendStatus({ state: 'loading', label: 'Wysyłam manifest renderu...' });
+
+    try {
+      const createdRenderJob = await apiClient.createRenderJob(remoteProject.id, {
+        ...renderManifest,
+        project: {
+          ...renderManifest.project,
+          id: remoteProject.id,
+          title: remoteProject.title
+        }
+      });
+      setRemoteRenderJob(createdRenderJob);
+      setBackendStatus({ state: 'online', label: `Render API: ${createdRenderJob.status}` });
+    } catch (error) {
+      setBackendStatus({ state: 'offline', label: 'Błąd render joba' });
+      setApiError(error.message);
+    }
+  }
+
+  async function advanceBackendRenderJob() {
+    if (!remoteRenderJob) return;
+
+    setApiError(null);
+
+    try {
+      const advancedJob = await apiClient.advanceRenderJob(remoteRenderJob.id);
+      setRemoteRenderJob(advancedJob);
+      setBackendStatus({ state: 'online', label: `Render API: ${advancedJob.status} ${advancedJob.progress}%` });
+    } catch (error) {
+      setBackendStatus({ state: 'offline', label: 'Błąd postępu renderu' });
+      setApiError(error.message);
+    }
+  }
 
   function queueRender() {
     setRenderJob(createRenderJob({
@@ -147,6 +223,8 @@ export function App() {
     setUploadErrors([]);
     setPreviewTime(0);
     setIsPreviewPlaying(false);
+    setRemoteProject(null);
+    setRemoteRenderJob(null);
   }
 
   function togglePreview() {
@@ -224,16 +302,24 @@ export function App() {
           activeClip={activeClip}
           isPreviewPlaying={isPreviewPlaying}
           togglePreview={togglePreview}
+          backendStatus={backendStatus}
+          remoteProject={remoteProject}
+          remoteRenderJob={remoteRenderJob}
+          apiError={apiError}
+          checkBackend={checkBackend}
+          syncProjectToBackend={syncProjectToBackend}
+          createBackendRenderJob={createBackendRenderJob}
+          advanceBackendRenderJob={advanceBackendRenderJob}
         />
       )}
 
-      {activeTab === 'projects' && <Projects project={project} snapshots={snapshots} />}
+      {activeTab === 'projects' && <Projects project={project} snapshots={snapshots} remoteProject={remoteProject} remoteRenderJob={remoteRenderJob} />}
       {activeTab === 'roadmap' && <Roadmap />}
     </main>
   );
 }
 
-function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors, previewTime, playbackDuration, activeAsset, activeClip, isPreviewPlaying, togglePreview }) {
+function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, renderManifest, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject, uploadErrors, previewTime, playbackDuration, activeAsset, activeClip, isPreviewPlaying, togglePreview, backendStatus, remoteProject, remoteRenderJob, apiError, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
   return (
     <section className="workspace-grid">
       <UploadZone
@@ -323,6 +409,16 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
             </button>
           ))}
         </div>
+        <BackendPanel
+          backendStatus={backendStatus}
+          remoteProject={remoteProject}
+          remoteRenderJob={remoteRenderJob}
+          apiError={apiError}
+          checkBackend={checkBackend}
+          syncProjectToBackend={syncProjectToBackend}
+          createBackendRenderJob={createBackendRenderJob}
+          advanceBackendRenderJob={advanceBackendRenderJob}
+        />
         <div className="manifest-card">
           <strong>Render manifest</strong>
           <span>{renderManifest.timeline.length} klipów · {renderManifest.output.width}×{renderManifest.output.height} · {renderManifest.output.fps} FPS</span>
@@ -330,7 +426,7 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
             <Download size={16} /> Pobierz manifest JSON
           </button>
         </div>
-        <button className="primary-btn full" onClick={queueRender}>Dodaj render</button>
+        <button className="primary-btn full" onClick={queueRender}>Dodaj render lokalny</button>
         {renderJob && (
           <div className="job-card">
             <div className="job-topline">
@@ -345,6 +441,41 @@ function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selecte
         )}
       </div>
     </section>
+  );
+}
+
+function BackendPanel({ backendStatus, remoteProject, remoteRenderJob, apiError, checkBackend, syncProjectToBackend, createBackendRenderJob, advanceBackendRenderJob }) {
+  const StatusIcon = backendStatus.state === 'online' ? CheckCircle2 : backendStatus.state === 'loading' ? Cloud : Server;
+
+  return (
+    <div className="backend-card">
+      <div className="backend-topline">
+        <div>
+          <p className="eyebrow">Backend Sync</p>
+          <strong>FastAPI · {apiClient.baseUrl}</strong>
+        </div>
+        <span className={`backend-status ${backendStatus.state}`}><StatusIcon size={15} /> {backendStatus.label}</span>
+      </div>
+      <div className="backend-actions">
+        <button className="ghost-btn" onClick={checkBackend}>Sprawdź API</button>
+        <button className="ghost-btn" onClick={syncProjectToBackend}>Utwórz projekt API</button>
+        <button className="ghost-btn" onClick={createBackendRenderJob}>Wyślij render API</button>
+        <button className="ghost-btn" onClick={advanceBackendRenderJob} disabled={!remoteRenderJob}>Advance API render</button>
+      </div>
+      {remoteProject && <p>Projekt API: <code>{remoteProject.id}</code></p>}
+      {remoteRenderJob && (
+        <div className="remote-job">
+          <div className="job-topline">
+            <strong>{remoteRenderJob.status}</strong>
+            <span>{remoteRenderJob.progress}%</span>
+          </div>
+          <div className="progress"><span style={{ width: `${remoteRenderJob.progress}%` }} /></div>
+          {remoteRenderJob.output_url && <p>Output: {remoteRenderJob.output_url}</p>}
+          <RenderLogs logs={remoteRenderJob.logs} />
+        </div>
+      )}
+      {apiError && <p className="api-error"><AlertTriangle size={15} /> {apiError}</p>}
+    </div>
   );
 }
 
@@ -481,17 +612,31 @@ function RenderLogs({ logs = [] }) {
   );
 }
 
-function Projects({ project, snapshots }) {
+function Projects({ project, snapshots, remoteProject, remoteRenderJob }) {
   return (
     <section className="panel page-panel">
       <p className="eyebrow">Projects hub</p>
       <h2>Panel projektów</h2>
       <div className="project-card">
         <strong>{project.title}</strong>
-        <span>Status: {project.status}</span>
+        <span>Status lokalny: {project.status}</span>
         <span>Audio: {project.audio?.name}</span>
         <span>Assets: {project.assets.length}</span>
       </div>
+      {remoteProject && (
+        <div className="project-card">
+          <strong>Backend project</strong>
+          <span>ID: {remoteProject.id}</span>
+          <span>Status API: {remoteProject.status}</span>
+        </div>
+      )}
+      {remoteRenderJob && (
+        <div className="project-card">
+          <strong>Backend render</strong>
+          <span>ID: {remoteRenderJob.id}</span>
+          <span>Status: {remoteRenderJob.status} · {remoteRenderJob.progress}%</span>
+        </div>
+      )}
       <div className="snapshot-list">
         <h3>Snapshoty localStorage</h3>
         {snapshots.length === 0 ? <p className="muted">Brak snapshotów. Utwórz pierwszy w edytorze.</p> : snapshots.map((snapshot) => (
