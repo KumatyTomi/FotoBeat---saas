@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
-import { Activity, AudioLines, Clapperboard, Images, LayoutDashboard, Play, Rocket, Sparkles, Wand2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, AudioLines, Camera, Clapperboard, Images, LayoutDashboard, Play, Rocket, Save, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { demoProject, effectPresets } from './data/demoProject.js';
+import { createImageAsset, formatBytes } from './lib/assetScoring.js';
+import { createAudioAsset } from './lib/audioAnalyzer.js';
 import { estimateBeatGrid, planCutsFromAssets } from './lib/beatPlanner.js';
+import { clearStoredProject, loadSnapshots, loadStoredProject, saveSnapshot, saveStoredProject } from './lib/projectStorage.js';
 import { createRenderJob, simulateRenderProgress } from './lib/renderQueue.js';
 
 const tabs = [
@@ -10,26 +13,44 @@ const tabs = [
   { id: 'roadmap', label: 'Roadmap', icon: Rocket }
 ];
 
+function createInitialProject() {
+  const storedProject = loadStoredProject();
+
+  return storedProject ?? {
+    ...demoProject,
+    assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo' })),
+    audio: { ...demoProject.audio, source: 'demo' }
+  };
+}
+
 export function App() {
   const [activeTab, setActiveTab] = useState('editor');
+  const [project, setProject] = useState(createInitialProject);
+  const [snapshots, setSnapshots] = useState(loadSnapshots);
   const [selectedPreset, setSelectedPreset] = useState(effectPresets[0]);
-  const [selectedProfile, setSelectedProfile] = useState(demoProject.exportProfiles[0]);
+  const [selectedProfile, setSelectedProfile] = useState(project.exportProfiles[0]);
   const [renderJob, setRenderJob] = useState(null);
 
+  const audioMeta = project.audio ?? demoProject.audio;
+
   const beats = useMemo(() => estimateBeatGrid({
-    durationSeconds: demoProject.audio.duration,
-    bpm: demoProject.audio.bpm
-  }), []);
+    durationSeconds: audioMeta.duration,
+    bpm: audioMeta.bpm
+  }), [audioMeta.duration, audioMeta.bpm]);
 
   const plannedTimeline = useMemo(() => planCutsFromAssets({
-    assets: demoProject.assets,
-    durationSeconds: demoProject.audio.duration,
-    bpm: demoProject.audio.bpm
-  }), []);
+    assets: project.assets,
+    durationSeconds: audioMeta.duration,
+    bpm: audioMeta.bpm
+  }), [project.assets, audioMeta.duration, audioMeta.bpm]);
+
+  useEffect(() => {
+    saveStoredProject(project);
+  }, [project]);
 
   function queueRender() {
     setRenderJob(createRenderJob({
-      projectId: demoProject.id,
+      projectId: project.id,
       profile: selectedProfile,
       preset: selectedPreset,
       timeline: plannedTimeline
@@ -38,6 +59,52 @@ export function App() {
 
   function progressRender() {
     setRenderJob((job) => job ? simulateRenderProgress(job) : job);
+  }
+
+  function handleImagesSelected(files) {
+    const imageAssets = [...files]
+      .filter((file) => file.type.startsWith('image/'))
+      .map((file, index) => createImageAsset(file, index));
+
+    if (!imageAssets.length) return;
+
+    setProject((current) => ({
+      ...current,
+      status: 'editing',
+      assets: [...imageAssets, ...current.assets]
+    }));
+  }
+
+  async function handleAudioSelected(file) {
+    if (!file) return;
+
+    const audio = await createAudioAsset(file);
+    setProject((current) => ({
+      ...current,
+      status: 'editing',
+      audio
+    }));
+  }
+
+  function removeAsset(assetId) {
+    setProject((current) => ({
+      ...current,
+      assets: current.assets.filter((asset) => asset.id !== assetId)
+    }));
+  }
+
+  function createManualSnapshot() {
+    setSnapshots(saveSnapshot(project, `Snapshot — ${project.assets.length} assets`));
+  }
+
+  function resetProject() {
+    clearStoredProject();
+    setProject({
+      ...demoProject,
+      assets: demoProject.assets.map((asset) => ({ ...asset, source: 'demo' })),
+      audio: { ...demoProject.audio, source: 'demo' }
+    });
+    setRenderJob(null);
   }
 
   return (
@@ -52,7 +119,7 @@ export function App() {
           </p>
           <div className="hero-actions">
             <button className="primary-btn" onClick={() => setActiveTab('editor')}>
-              <Play size={18} /> Otwórz demo edytora
+              <Play size={18} /> Otwórz edytor MVP
             </button>
             <button className="ghost-btn" onClick={() => setActiveTab('roadmap')}>
               Zobacz plan v1
@@ -64,8 +131,8 @@ export function App() {
           <div className="orb orb-b" />
           <div className="glass-panel">
             <Clapperboard size={34} />
-            <strong>{demoProject.title}</strong>
-            <span>{demoProject.audio.bpm} BPM · {demoProject.audio.duration}s · {demoProject.assets.length} zdjęcia</span>
+            <strong>{project.title}</strong>
+            <span>{audioMeta.bpm} BPM · {audioMeta.duration}s · {project.assets.length} zdjęć</span>
           </div>
         </div>
       </section>
@@ -87,6 +154,8 @@ export function App() {
 
       {activeTab === 'editor' && (
         <Editor
+          project={project}
+          audioMeta={audioMeta}
           selectedPreset={selectedPreset}
           setSelectedPreset={setSelectedPreset}
           selectedProfile={selectedProfile}
@@ -96,19 +165,32 @@ export function App() {
           renderJob={renderJob}
           queueRender={queueRender}
           progressRender={progressRender}
+          handleImagesSelected={handleImagesSelected}
+          handleAudioSelected={handleAudioSelected}
+          removeAsset={removeAsset}
+          createManualSnapshot={createManualSnapshot}
+          resetProject={resetProject}
         />
       )}
 
-      {activeTab === 'projects' && <Projects />}
+      {activeTab === 'projects' && <Projects project={project} snapshots={snapshots} />}
       {activeTab === 'roadmap' && <Roadmap />}
     </main>
   );
 }
 
-function Editor({ selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, queueRender, progressRender }) {
+function Editor({ project, audioMeta, selectedPreset, setSelectedPreset, selectedProfile, setSelectedProfile, beats, plannedTimeline, renderJob, queueRender, progressRender, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
   return (
     <section className="workspace-grid">
-      <UploadZone />
+      <UploadZone
+        project={project}
+        audioMeta={audioMeta}
+        handleImagesSelected={handleImagesSelected}
+        handleAudioSelected={handleAudioSelected}
+        removeAsset={removeAsset}
+        createManualSnapshot={createManualSnapshot}
+        resetProject={resetProject}
+      />
 
       <div className="panel timeline-panel">
         <div className="panel-heading">
@@ -123,12 +205,13 @@ function Editor({ selectedPreset, setSelectedPreset, selectedProfile, setSelecte
             <div key={`${clip.assetId}-${clip.start}`} className="clip" style={{ width: `${Math.max(12, (clip.end - clip.start) * 3)}%` }}>
               <strong>{clip.effect}</strong>
               <span>{clip.start}s — {clip.end}s</span>
+              <small>{clip.assetId.slice(0, 10)}</small>
             </div>
           ))}
         </div>
         <div className="beat-row">
-          {beats.slice(0, 32).map((beat) => (
-            <span key={beat.index} className={beat.strength === 'downbeat' ? 'beat downbeat' : 'beat'} />
+          {beats.slice(0, 48).map((beat) => (
+            <span key={beat.index} className={beat.strength === 'downbeat' ? 'beat downbeat' : 'beat'} title={`${beat.time}s`} />
           ))}
         </div>
       </div>
@@ -164,7 +247,7 @@ function Editor({ selectedPreset, setSelectedPreset, selectedProfile, setSelecte
           <Activity size={22} />
         </div>
         <div className="profile-grid">
-          {demoProject.exportProfiles.map((profile) => (
+          {project.exportProfiles.map((profile) => (
             <button
               key={profile.id}
               className={selectedProfile.id === profile.id ? 'profile active' : 'profile'}
@@ -191,7 +274,7 @@ function Editor({ selectedPreset, setSelectedPreset, selectedProfile, setSelecte
   );
 }
 
-function UploadZone() {
+function UploadZone({ project, audioMeta, handleImagesSelected, handleAudioSelected, removeAsset, createManualSnapshot, resetProject }) {
   return (
     <div className="panel upload-panel">
       <div className="panel-heading">
@@ -201,38 +284,76 @@ function UploadZone() {
         </div>
       </div>
       <div className="drop-grid">
-        <div className="drop-card">
+        <label className="drop-card input-card">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            onChange={(event) => handleImagesSelected(event.target.files)}
+          />
           <Images size={28} />
           <strong>Wrzuć zdjęcia</strong>
-          <span>JPG, PNG, WEBP · auto scoring kadrów</span>
-        </div>
-        <div className="drop-card">
+          <span>JPG, PNG, WEBP · lokalny scoring kadrów</span>
+        </label>
+        <label className="drop-card input-card">
+          <input
+            type="file"
+            accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav"
+            onChange={(event) => handleAudioSelected(event.target.files?.[0])}
+          />
           <AudioLines size={28} />
-          <strong>Wrzuć MP3</strong>
-          <span>Analiza BPM, energii i dropów</span>
-        </div>
+          <strong>Wrzuć MP3/WAV</strong>
+          <span>{audioMeta.name} · {audioMeta.bpm} BPM · {audioMeta.duration}s</span>
+        </label>
       </div>
-      <ul className="asset-list">
-        {demoProject.assets.map((asset) => (
-          <li key={asset.id}>
-            <span>{asset.name}</span>
-            <strong>{asset.score}/100</strong>
-          </li>
+
+      <div className="toolbar-row">
+        <button className="ghost-btn" onClick={createManualSnapshot}><Save size={16} /> Snapshot</button>
+        <button className="ghost-btn" onClick={resetProject}><Trash2 size={16} /> Reset</button>
+      </div>
+
+      <div className="asset-grid">
+        {project.assets.map((asset) => (
+          <article className="asset-card" key={asset.id}>
+            {asset.previewUrl ? (
+              <img src={asset.previewUrl} alt={asset.name} />
+            ) : (
+              <div className="asset-placeholder"><Camera size={24} /></div>
+            )}
+            <div>
+              <strong>{asset.name}</strong>
+              <span>{asset.score}/100 · {asset.source ?? 'asset'} · {formatBytes(asset.size)}</span>
+              <small>{asset.tags?.join(' · ')}</small>
+            </div>
+            <button className="icon-btn" onClick={() => removeAsset(asset.id)} aria-label={`Usuń ${asset.name}`}>
+              <Trash2 size={16} />
+            </button>
+          </article>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
 
-function Projects() {
+function Projects({ project, snapshots }) {
   return (
     <section className="panel page-panel">
       <p className="eyebrow">Projects hub</p>
       <h2>Panel projektów</h2>
       <div className="project-card">
-        <strong>{demoProject.title}</strong>
-        <span>Status: {demoProject.status}</span>
-        <span>Audio: {demoProject.audio.name}</span>
+        <strong>{project.title}</strong>
+        <span>Status: {project.status}</span>
+        <span>Audio: {project.audio?.name}</span>
+        <span>Assets: {project.assets.length}</span>
+      </div>
+      <div className="snapshot-list">
+        <h3>Snapshoty localStorage</h3>
+        {snapshots.length === 0 ? <p className="muted">Brak snapshotów. Utwórz pierwszy w edytorze.</p> : snapshots.map((snapshot) => (
+          <div className="snapshot-card" key={snapshot.id}>
+            <strong>{snapshot.label}</strong>
+            <span>{new Date(snapshot.createdAt).toLocaleString()}</span>
+          </div>
+        ))}
       </div>
     </section>
   );
