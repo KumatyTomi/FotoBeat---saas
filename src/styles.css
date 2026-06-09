@@ -19,8 +19,13 @@ body {
     linear-gradient(135deg, #090910 0%, #12111f 55%, #07070c 100%);
 }
 
-button {
+button, input {
   font: inherit;
+}
+
+button:focus-visible, label:focus-within {
+  outline: 2px solid rgba(82, 241, 255, 0.95);
+  outline-offset: 3px;
 }
 
 .app-shell {
@@ -58,7 +63,7 @@ button {
   font-weight: 800;
 }
 
-h1, h2 {
+h1, h2, h3 {
   margin: 0;
   letter-spacing: -0.05em;
 }
@@ -73,6 +78,10 @@ h2 {
   font-size: clamp(1.45rem, 2.5vw, 2.25rem);
 }
 
+h3 {
+  font-size: 1.05rem;
+}
+
 .hero-lead {
   color: #c9c5d8;
   max-width: 720px;
@@ -81,14 +90,18 @@ h2 {
   margin: 24px 0 0;
 }
 
-.hero-actions, .profile-grid, .drop-grid {
+.hero-actions, .profile-grid, .drop-grid, .toolbar-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 28px;
 }
 
-.primary-btn, .ghost-btn, .tab, .preset, .profile {
+.toolbar-row {
+  margin-top: 16px;
+}
+
+.primary-btn, .ghost-btn, .tab, .preset, .profile, .icon-btn {
   border: 0;
   border-radius: 999px;
   cursor: pointer;
@@ -107,13 +120,17 @@ h2 {
 }
 
 .ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   color: #f7f2ff;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.06);
   padding: 13px 18px;
 }
 
-.primary-btn:hover, .ghost-btn:hover, .tab:hover, .preset:hover, .profile:hover {
+.primary-btn:hover, .ghost-btn:hover, .tab:hover, .preset:hover, .profile:hover, .icon-btn:hover {
   transform: translateY(-1px);
 }
 
@@ -227,25 +244,79 @@ h2 {
   background: rgba(255, 255, 255, 0.045);
 }
 
-.drop-card span, .preset span, .profile span, .project-card span, .asset-list span, .clip span, .job-card p {
+.input-card {
+  cursor: pointer;
+}
+
+.input-card input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.drop-card span, .preset span, .profile span, .project-card span, .asset-card span, .clip span, .job-card p, .snapshot-card span, .muted {
   color: #bdb7cc;
 }
 
-.asset-list {
-  list-style: none;
-  padding: 0;
-  margin: 18px 0 0;
+.asset-grid {
+  margin-top: 18px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
-.asset-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 12px;
-  border-radius: 14px;
+.asset-card {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.asset-card img, .asset-placeholder {
+  width: 72px;
+  height: 54px;
+  border-radius: 13px;
+  object-fit: cover;
+  background: linear-gradient(145deg, rgba(255, 79, 216, 0.25), rgba(82, 241, 255, 0.13));
+}
+
+.asset-placeholder {
+  display: grid;
+  place-items: center;
+}
+
+.asset-card div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.asset-card strong, .asset-card span, .asset-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-card small, .clip small {
+  color: #8f88a5;
+}
+
+.icon-btn {
+  color: #f7f2ff;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .timeline {
@@ -298,9 +369,13 @@ h2 {
   font-weight: 900;
 }
 
-.preset-list, .roadmap-list {
+.preset-list, .roadmap-list, .snapshot-list {
   display: grid;
   gap: 10px;
+}
+
+.snapshot-list {
+  margin-top: 24px;
 }
 
 .preset {
@@ -363,13 +438,17 @@ h2 {
   min-height: 420px;
 }
 
-.project-card, .roadmap-item {
+.project-card, .roadmap-item, .snapshot-card {
   margin-top: 16px;
   padding: 18px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.045);
   display: grid;
   gap: 8px;
+}
+
+.snapshot-card {
+  margin-top: 0;
 }
 
 .roadmap-item {
@@ -390,4 +469,30 @@ h2 {
   }
 
   .timeline-panel { grid-row: auto; }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    width: min(100% - 20px, 1220px);
+    padding-top: 16px;
+  }
+
+  .hero-copy, .panel {
+    border-radius: 22px;
+    padding: 18px;
+  }
+
+  .asset-card {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .asset-card img, .asset-placeholder {
+    width: 56px;
+    height: 48px;
+  }
+
+  .icon-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
