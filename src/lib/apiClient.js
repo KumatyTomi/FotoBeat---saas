@@ -65,6 +65,10 @@ export const apiClient = {
     return upload(`/api/projects/${projectId}/assets`, file);
   },
 
+  listAssets(projectId) {
+    return request(`/api/projects/${projectId}/assets`);
+  },
+
   createRenderJob(projectId, manifest) {
     return request(`/api/projects/${projectId}/renders`, {
       method: 'POST',
