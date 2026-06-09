@@ -134,6 +134,49 @@
   background: rgba(248, 225, 108, 0.13);
 }
 
+.sync-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sync-summary span,
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d8d2e8;
+}
+
+.sync-badge.synced {
+  color: #d9fff9;
+  background: rgba(82, 241, 255, 0.14);
+}
+
+.sync-badge.uploading {
+  color: #fff4bf;
+  background: rgba(248, 225, 108, 0.14);
+}
+
+.sync-badge.failed {
+  color: #ffd1dc;
+  background: rgba(255, 79, 108, 0.16);
+}
+
+.sync-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .backend-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
