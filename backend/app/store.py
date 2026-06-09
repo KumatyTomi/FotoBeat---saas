@@ -44,6 +44,13 @@ class InMemoryStore:
         self.touch_project(job.project_id, ProjectStatus.RENDERING)
         return job
 
+    def list_render_jobs(self, project_id: str) -> list[RenderJob]:
+        return sorted(
+            [job for job in self.render_jobs.values() if job.project_id == project_id],
+            key=lambda job: job.created_at,
+            reverse=True,
+        )
+
     def get_render_job(self, render_id: str) -> RenderJob | None:
         return self.render_jobs.get(render_id)
 
