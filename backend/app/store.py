@@ -8,8 +8,8 @@ from .schemas import Asset, Project, ProjectCreate, ProjectStatus, RenderJob, Re
 
 
 class JsonBackedStore:
-    def __init__(self) -> None:
-        self.path = Path(os.getenv('FOTOBEAT_STORE_PATH', 'mock-storage/store.json'))
+    def __init__(self, store_path: str | os.PathLike[str] | None = None) -> None:
+        self.path = Path(store_path or os.getenv('FOTOBEAT_STORE_PATH', 'mock-storage/store.json'))
         self.lock = RLock()
         self.projects: dict[str, Project] = {}
         self.assets: dict[str, Asset] = {}
