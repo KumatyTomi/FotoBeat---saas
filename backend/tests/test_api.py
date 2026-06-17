@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas import ProjectCreate
+from app.store import JsonBackedStore
 
 client = TestClient(app)
 
@@ -49,6 +51,18 @@ def test_project_asset_and_render_flow():
     advance_response = client.post(f"/api/renders/{render_job['id']}/advance")
     assert advance_response.status_code == 200
     assert advance_response.json()['progress'] == 25
+
+
+def test_json_store_persists_projects_between_instances(tmp_path):
+    store_path = tmp_path / 'fotobeat-store.json'
+    first_store = JsonBackedStore(store_path)
+    project = first_store.create_project(ProjectCreate(title='Persistent project'))
+
+    second_store = JsonBackedStore(store_path)
+    restored_project = second_store.get_project(project.id)
+
+    assert restored_project is not None
+    assert restored_project.title == 'Persistent project'
 
 
 def test_rejects_unsupported_asset_type():
