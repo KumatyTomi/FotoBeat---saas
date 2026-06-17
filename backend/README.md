@@ -48,9 +48,25 @@ cd backend
 pytest
 ```
 
+## Trwałość danych v0
+
+Backend używa teraz `JsonBackedStore`. Domyślnie zapisuje stan do:
+
+```text
+mock-storage/store.json
+```
+
+Ścieżkę można nadpisać zmienną środowiskową:
+
+```bash
+FOTOBEAT_STORE_PATH=/tmp/fotobeat-store.json uvicorn app.main:app --reload --port 8000
+```
+
+To nadal jest mock store, ale nie traci projektów, assetów i render jobów po samym restarcie procesu API.
+
 ## Co to robi teraz
 
-- trzyma dane w pamięci procesu,
+- zapisuje projekty, assety i render joby do lokalnego JSON,
 - zapisuje uploady lokalnie do `mock-storage/uploads`,
 - przyjmuje manifest `fotobeat.render.v1`,
 - tworzy mock render job,
@@ -58,7 +74,7 @@ pytest
 
 ## Co później wymienić
 
-- in-memory store → PostgreSQL,
+- JSON mock store → PostgreSQL,
 - mock storage → S3/R2/Supabase Storage,
 - `/advance` → prawdziwy worker z kolejki,
 - mock output URL → realny MP4 z FFmpeg.
