@@ -1,5 +1,7 @@
 # FotoBeat.me — SaaS generator filmów ze zdjęć i muzyki
 
+*English translation: see [README_EN.md](README_EN.md)*
+
 FotoBeat.me to aplikacja SaaS do automatycznego tworzenia krótkich teledysków, rolek i wizualizacji z paczki zdjęć oraz pliku audio. Założenie: użytkownik wrzuca zdjęcia i MP3, a system sam wybiera najlepsze kadry, dobiera tempo, filtry, przejścia i generuje gotowy materiał w formatach 16:9 oraz 9:16.
 
 ## Główna obietnica produktu
