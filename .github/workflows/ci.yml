@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build frontend
+    name: Lint, test and build frontend
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +22,18 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Check formatting
+        run: npx prettier --check .
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint code
+        run: npm run lint
 
       - name: Build app
         run: npm run build
